@@ -21,6 +21,7 @@ import {
   UserRound,
   History,
 } from 'lucide-react';
+import { hcmcLocations } from '../lib/hcmcLocations';
 
 interface POSSystemProps {
   user: UserAccount;
@@ -33,13 +34,28 @@ interface CartItem {
 }
 
 type FulfillmentMethod = 'pickup' | 'delivery';
+type PaymentMethod = 'cash' | 'transfer';
 
 interface DeliveryInfo {
   fullName: string;
   phone: string;
   address: string;
   email: string;
+  city: string;
+  district: string;
+  ward: string;
 }
+
+const defaultCity = hcmcLocations[0]?.city ?? '';
+const createEmptyDeliveryInfo = (): DeliveryInfo => ({
+  fullName: '',
+  phone: '',
+  address: '',
+  email: '',
+  city: defaultCity,
+  district: '',
+  ward: '',
+});
 
 export default function POSSystem({ user, onLogout }: POSSystemProps) {
   const [products, setProducts] = useState<Product[]>(() => cloneProductCatalog());
@@ -55,12 +71,7 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
   const [isHistoryVisible, setIsHistoryVisible] = useState(false);
   const [isAvatarMenuOpen, setIsAvatarMenuOpen] = useState(false);
   const [fulfillmentMethod, setFulfillmentMethod] = useState<FulfillmentMethod>('pickup');
-  const [deliveryInfo, setDeliveryInfo] = useState<DeliveryInfo>({
-    fullName: '',
-    phone: '',
-    address: '',
-    email: '',
-  });
+  const [deliveryInfo, setDeliveryInfo] = useState<DeliveryInfo>(() => createEmptyDeliveryInfo());
   const [deliveryErrors, setDeliveryErrors] = useState<Partial<Record<keyof DeliveryInfo, string>>>({});
   const [cartPage, setCartPage] = useState(1);
   const itemsPerPage = 3;
@@ -68,6 +79,10 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
   const [lastOrderItems, setLastOrderItems] = useState(0);
   const userHistory = useMemo(() => getPurchaseHistoryByUser(user.userID), [user.userID]);
   const [showCongrats, setShowCongrats] = useState(false);
+  const [pendingOrder, setPendingOrder] = useState<{ total: number; items: number } | null>(null);
+  const [pendingCart, setPendingCart] = useState<CartItem[]>([]);
+  const [isQrModalVisible, setIsQrModalVisible] = useState(false);
+  const [qrPaymentStep, setQrPaymentStep] = useState<'scan' | 'success'>('scan');
   const cartTotalPages = Math.max(1, Math.ceil(cart.length / itemsPerPage));
   const paginatedCart = useMemo(
     () => cart.slice((cartPage - 1) * itemsPerPage, cartPage * itemsPerPage),
@@ -165,17 +180,11 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
     return cart.reduce((sum, item) => sum + item.quantity, 0);
   };
 
-  const checkout = async (paymentMethod: string) => {
-    if (cart.length === 0 || isProcessing) return;
-
-    const totalAmount = getTotalAmount();
-    const totalItems = getTotalItems();
-
-    setIsProcessing(true);
+  const finalizeCheckout = (cartSnapshot: CartItem[], totalAmount: number, totalItems: number) => {
     setTimeout(() => {
       setProducts((prev) =>
         prev.map((product) => {
-          const cartItem = cart.find((item) => item.product.id === product.id);
+          const cartItem = cartSnapshot.find((item) => item.product.id === product.id);
           if (!cartItem) return product;
           return { ...product, stock: Math.max(product.stock - cartItem.quantity, 0) };
         }),
@@ -185,18 +194,72 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
       setLastOrderTotal(totalAmount);
       setLastOrderItems(totalItems);
       setFulfillmentMethod('pickup');
-      setDeliveryInfo({ fullName: '', phone: '', address: '', email: '' });
+      setDeliveryInfo(createEmptyDeliveryInfo());
+      setDeliveryErrors({});
       setIsFulfillmentVisible(true);
+      setPendingOrder(null);
+      setPendingCart([]);
     }, 500);
+  };
+
+  const checkout = async (paymentMethod: PaymentMethod) => {
+    if (cart.length === 0 || isProcessing) return;
+
+    const cartSnapshot: CartItem[] = cart.map((item) => ({
+      product: { ...item.product },
+      quantity: item.quantity,
+    }));
+    const totalAmount = getTotalAmount();
+    const totalItems = getTotalItems();
+    setPendingOrder({ total: totalAmount, items: totalItems });
+    setPendingCart(cartSnapshot);
+    setIsProcessing(true);
+
+    if (paymentMethod === 'transfer') {
+      setQrPaymentStep('scan');
+      setIsQrModalVisible(true);
+      return;
+    }
+
+    finalizeCheckout(cartSnapshot, totalAmount, totalItems);
+  };
+
+  const handleQrModalClose = () => {
+    setIsQrModalVisible(false);
+    setIsProcessing(false);
+    setPendingOrder(null);
+    setPendingCart([]);
+  };
+
+  const handleQrPaymentSuccess = () => {
+    if (!pendingOrder || pendingCart.length === 0) return;
+    setQrPaymentStep('success');
+    setTimeout(() => {
+      setIsQrModalVisible(false);
+      finalizeCheckout(pendingCart, pendingOrder.total, pendingOrder.items);
+    }, 1200);
   };
 
   const handleConfirmFulfillment = () => {
     if (fulfillmentMethod === 'delivery') {
       const errors: Partial<Record<keyof DeliveryInfo, string>> = {};
-      if (!deliveryInfo.fullName || !deliveryInfo.phone || !deliveryInfo.address) {
-        errors.fullName = deliveryInfo.fullName ? '' : 'Vui lòng nhập họ tên';
-        errors.phone = deliveryInfo.phone ? '' : 'Vui lòng nhập số điện thoại';
-        errors.address = deliveryInfo.address ? '' : 'Vui lòng nhập địa chỉ';
+      if (!deliveryInfo.fullName) {
+        errors.fullName = 'Vui lòng nhập họ tên';
+      }
+      if (!deliveryInfo.phone) {
+        errors.phone = 'Vui lòng nhập số điện thoại';
+      }
+      if (!deliveryInfo.city) {
+        errors.city = 'Vui lòng chọn thành phố';
+      }
+      if (!deliveryInfo.district) {
+        errors.district = 'Vui lòng chọn quận/huyện';
+      }
+      if (!deliveryInfo.ward) {
+        errors.ward = 'Vui lòng chọn phường/xã';
+      }
+      if (!deliveryInfo.address) {
+        errors.address = 'Vui lòng nhập địa chỉ nhà';
       }
       if (deliveryInfo.phone && !/^\d{10}$/.test(deliveryInfo.phone)) {
         errors.phone = 'Số điện thoại phải gồm đúng 10 chữ số';
@@ -421,12 +484,12 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
                 Thanh toán tiền mặt
               </button>
               <button
-                onClick={() => checkout('card')}
+                onClick={() => checkout('transfer')}
                 disabled={cart.length === 0 || isProcessing}
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
               >
                 <CreditCard className="w-5 h-5" />
-                Thanh toán thẻ
+                Thanh toán chuyển khoản
               </button>
             </div>
           </div>
@@ -452,6 +515,15 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
       {isProfileVisible && <ProfileModal user={user} onClose={() => setIsProfileVisible(false)} />}
       {isHistoryVisible && (
         <HistoryModal entries={userHistory} onClose={() => setIsHistoryVisible(false)} />
+      )}
+      {isQrModalVisible && pendingOrder && (
+        <QRPaymentModal
+          total={pendingOrder.total}
+          items={pendingOrder.items}
+          step={qrPaymentStep}
+          onClose={handleQrModalClose}
+          onSuccess={handleQrPaymentSuccess}
+        />
       )}
       {showCongrats && (
         <CongratsModal method={fulfillmentMethod} onClose={() => setShowCongrats(false)} />
@@ -759,6 +831,101 @@ function HistoryModal({
   );
 }
 
+interface QRPaymentModalProps {
+  total: number;
+  items: number;
+  step: 'scan' | 'success';
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+function QRPaymentModal({ total, items, step, onClose, onSuccess }: QRPaymentModalProps) {
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
+        <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+          <div>
+            <p className="text-sm text-gray-500">Thanh toán chuyển khoản</p>
+            <h3 className="text-xl font-semibold text-gray-800">
+              {items} món · {total.toLocaleString('vi-VN')}đ
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-gray-500 hover:text-gray-900 text-xl leading-none px-2 py-1"
+            aria-label="Đóng thanh toán"
+            disabled={step === 'success'}
+          >
+            ×
+          </button>
+        </div>
+        <div className="p-6 space-y-6">
+          {step === 'scan' ? (
+            <>
+              <div className="text-center space-y-2">
+                <p className="text-gray-500 text-sm">Quét mã QR bên dưới để chuyển khoản.</p>
+                <p className="text-2xl font-bold text-blue-600">
+                  {total.toLocaleString('vi-VN')}đ
+                </p>
+                <p className="text-sm text-gray-500">Người nhận: MegaPOS</p>
+              </div>
+              <div className="flex flex-col items-center gap-4">
+                <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200">
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=MegaPOS%20${total}`}
+                    alt="Mã QR thanh toán chuyển khoản"
+                    className="w-48 h-48 object-contain"
+                  />
+                </div>
+                <p className="text-sm text-gray-500">
+                  Nội dung chuyển khoản: <span className="font-semibold text-gray-700">MEGAPOS-{items}</span>
+                </p>
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-8 space-y-3">
+              <div className="text-5xl">✅</div>
+              <p className="text-xl font-semibold text-gray-800">Thanh toán thành công!</p>
+              <p className="text-gray-500">
+                Đang chuyển sang bước chọn hình thức nhận hàng...
+              </p>
+            </div>
+          )}
+        </div>
+        <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+          {step === 'scan' ? (
+            <>
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors"
+              >
+                Huỷ
+              </button>
+              <button
+                type="button"
+                onClick={onSuccess}
+                className="px-5 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
+              >
+                Xác nhận đã chuyển khoản
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              disabled
+              className="px-5 py-2 rounded-lg bg-gray-200 text-gray-600 cursor-wait"
+            >
+              Đang xử lý...
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CongratsModal({
   onClose,
   method,
@@ -838,6 +1005,11 @@ function FulfillmentModal({
   items,
   errors,
 }: FulfillmentModalProps) {
+  const selectedCity = hcmcLocations.find((city) => city.city === info.city);
+  const availableDistricts = selectedCity ? selectedCity.districts : [];
+  const selectedDistrict = availableDistricts.find((district) => district.name === info.district);
+  const availableWards = selectedDistrict ? selectedDistrict.wards : [];
+
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden">
@@ -938,17 +1110,94 @@ function FulfillmentModal({
                   {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email}</p>}
                 </div>
               </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Thành phố</label>
+                  <select
+                    value={info.city}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      onInfoChange('city', value);
+                      onInfoChange('district', '');
+                      onInfoChange('ward', '');
+                    }}
+                    className={`w-full rounded-lg px-3 py-2 focus:ring-2 ${
+                      errors.city
+                        ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
+                        : 'border-gray-300 focus:ring-blue-500 focus:border-transparent'
+                    }`}
+                  >
+                    <option value="">Chọn thành phố</option>
+                    {hcmcLocations.map((city) => (
+                      <option key={city.city} value={city.city}>
+                        {city.city}
+                      </option>
+                    ))}
+                  </select>
+                  {errors.city && <p className="text-xs text-red-500 mt-1">{errors.city}</p>}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Quận/Huyện</label>
+                  <select
+                    value={info.district}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      onInfoChange('district', value);
+                      onInfoChange('ward', '');
+                    }}
+                    disabled={!info.city}
+                    className={`w-full rounded-lg px-3 py-2 focus:ring-2 ${
+                      errors.district
+                        ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
+                        : 'border-gray-300 focus:ring-blue-500 focus:border-transparent'
+                    } ${!info.city ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                  >
+                    <option value="">{info.city ? 'Chọn quận/huyện' : 'Chọn thành phố trước'}</option>
+                    {availableDistricts.map((district) => (
+                      <option key={district.name} value={district.name}>
+                        {district.name}
+                      </option>
+                    ))}
+                  </select>
+                  {errors.district && <p className="text-xs text-red-500 mt-1">{errors.district}</p>}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Phường/Xã</label>
+                  <select
+                    value={info.ward}
+                    onChange={(e) => onInfoChange('ward', e.target.value)}
+                    disabled={!info.district}
+                    className={`w-full rounded-lg px-3 py-2 focus:ring-2 ${
+                      errors.ward
+                        ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
+                        : 'border-gray-300 focus:ring-blue-500 focus:border-transparent'
+                    } ${!info.district ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                  >
+                    <option value="">{info.district ? 'Chọn phường/xã' : 'Chọn quận/huyện trước'}</option>
+                    {availableWards.map((ward) => (
+                      <option key={ward} value={ward}>
+                        {ward}
+                      </option>
+                    ))}
+                  </select>
+                  {errors.ward && <p className="text-xs text-red-500 mt-1">{errors.ward}</p>}
+                  {!info.district && (
+                    <p className="text-xs text-gray-500 mt-1">Vui lòng chọn quận/huyện để hiển thị danh sách phường/xã.</p>
+                  )}
+                </div>
+              </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Địa chỉ giao hàng</label>
-                <textarea
+                <label className="block text-sm font-medium text-gray-700 mb-1">Địa chỉ nhà</label>
+                <input
+                  type="text"
                   value={info.address}
                   onChange={(e) => onInfoChange('address', e.target.value)}
-                  className={`w-full rounded-lg px-3 py-2 focus:ring-2 min-h-[80px] ${
+                  className={`w-full rounded-lg px-3 py-2 focus:ring-2 ${
                     errors.address
                       ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
                       : 'border-gray-300 focus:ring-blue-500 focus:border-transparent'
                   }`}
-                  placeholder="Số nhà, đường, phường/xã, quận/huyện..."
+                  placeholder="Số nhà, tên đường..."
                 />
                 {errors.address && <p className="text-xs text-red-500 mt-1">{errors.address}</p>}
               </div>
