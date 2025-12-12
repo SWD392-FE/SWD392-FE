@@ -137,6 +137,26 @@ export default function FaceLogin({ onLogin }: FaceLoginProps) {
     'Đảm bảo đủ ánh sáng và không đeo khẩu trang',
   ];
 
+  const guestUser: UserAccount = {
+    userID: 0,
+    fullName: 'Guest',
+    email: 'guest@megapos.app',
+    passwordHash: 'guest',
+    phoneNumber: '',
+    createdAt: new Date().toISOString(),
+    isActive: true,
+  };
+
+  const loginWithoutScan = () => {
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach((track) => track.stop());
+      videoRef.current.srcObject = null;
+    }
+    setIsScanning(false);
+    onLogin(guestUser);
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 relative overflow-hidden flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,.35),_transparent_65%)]" />
@@ -145,7 +165,7 @@ export default function FaceLogin({ onLogin }: FaceLoginProps) {
       <button
         type="button"
         onClick={loginWithoutScan}
-        className="absolute top-6 right-6 bg-white/80 backdrop-blur px-5 py-2 rounded-full text-sm font-semibold text-slate-700 shadow-lg hover:bg-white transition-colors flex items-center gap-2"
+        className="absolute top-6 right-6 z-50 bg-white/90 backdrop-blur px-5 py-2 rounded-full text-sm font-semibold text-slate-700 shadow-lg hover:bg-white transition-colors flex items-center gap-2 border border-slate-200"
       >
         <RefreshCcw className="w-4 h-4" />
         Mua hàng nhanh
@@ -159,7 +179,7 @@ export default function FaceLogin({ onLogin }: FaceLoginProps) {
               <h1 className="text-2xl font-semibold">Quét khuôn mặt</h1>
             </div>
             <span className="text-xs px-3 py-1 rounded-full bg-slate-800 text-slate-200 border border-slate-700">
-              POS Service · Bảo mật đa lớp
+              MegaPOS · Bảo mật đa lớp
             </span>
           </header>
 
@@ -196,7 +216,7 @@ export default function FaceLogin({ onLogin }: FaceLoginProps) {
             )}
           </div>
 
-          <div className="flex items-center justify-between bg-slate-800/60 rounded-2xl px-4 py-3 text-slate-200">
+          <div className="flex flex-col gap-4 bg-slate-800/60 rounded-2xl px-4 py-4 text-slate-200">
             <div className="flex items-center gap-3">
               {isLoading ? (
                 <div className="w-10 h-10 rounded-full bg-slate-900 flex items-center justify-center">
@@ -212,14 +232,14 @@ export default function FaceLogin({ onLogin }: FaceLoginProps) {
                 <p className="font-medium">{message}</p>
               </div>
             </div>
-            <div>
+            <div className="flex flex-wrap gap-3">
               {!isScanning && !isLoading && (
                 <button
                   onClick={startCamera}
                   className="px-6 py-3 rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 text-white font-semibold flex items-center gap-2 shadow-lg shadow-sky-500/30"
                 >
                   <Camera className="w-4 h-4" />
-                  Bắt đầu quét
+                  Quét khuôn mặt
                 </button>
               )}
               {isScanning && (
@@ -264,24 +284,8 @@ export default function FaceLogin({ onLogin }: FaceLoginProps) {
               xác thực thành công, camera sẽ tự động tắt.
             </p>
           </div>
-
-          <button
-            type="button"
-            onClick={loginWithoutScan}
-            className="mt-6 w-full border border-dashed border-slate-300 rounded-2xl px-4 py-3 text-slate-600 flex items-center justify-center gap-2 hover:bg-slate-100 transition-colors text-sm font-medium"
-          >
-            <RefreshCcw className="w-4 h-4" />
-            Mua hàng nhanh (bỏ qua quét khuôn mặt)
-          </button>
         </section>
       </div>
     </div>
   );
 }
-  const loginWithoutScan = () => {
-    const fallbackUser = users[0];
-    if (!fallbackUser) return;
-    stopCamera();
-    setMessage('Đang chuyển tới giao diện bán hàng...');
-    requestAnimationFrame(() => onLogin(fallbackUser));
-  };

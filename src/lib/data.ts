@@ -169,4 +169,4 @@ export const purchaseHistory: PurchaseHistoryEntry[] = [
 
 export const getUserById = (userID: number) => users.find((user) => user.userID === userID);
 export const getPurchaseHistoryByUser = (userID: number) =>
-  purchaseHistory.filter((entry) => entry.userID === userID);
+  userID === 0 ? [] : purchaseHistory.filter((entry) => entry.userID === userID);

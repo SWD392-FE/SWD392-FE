@@ -62,10 +62,17 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
     email: '',
   });
   const [deliveryErrors, setDeliveryErrors] = useState<Partial<Record<keyof DeliveryInfo, string>>>({});
+  const [cartPage, setCartPage] = useState(1);
+  const itemsPerPage = 3;
   const [lastOrderTotal, setLastOrderTotal] = useState(0);
   const [lastOrderItems, setLastOrderItems] = useState(0);
   const userHistory = useMemo(() => getPurchaseHistoryByUser(user.userID), [user.userID]);
   const [showCongrats, setShowCongrats] = useState(false);
+  const cartTotalPages = Math.max(1, Math.ceil(cart.length / itemsPerPage));
+  const paginatedCart = useMemo(
+    () => cart.slice((cartPage - 1) * itemsPerPage, cartPage * itemsPerPage),
+    [cart, cartPage, itemsPerPage],
+  );
   const userInitials = useMemo(
     () =>
       user.fullName
@@ -92,6 +99,12 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
   useEffect(() => {
     filterProducts();
   }, [products, searchTerm, selectedCategory]);
+
+  useEffect(() => {
+    if (cartPage > cartTotalPages) {
+      setCartPage(cartTotalPages);
+    }
+  }, [cartPage, cartTotalPages]);
 
   const filterProducts = () => {
     let filtered = products;
@@ -351,7 +364,7 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
               </div>
             ) : (
               <div className="space-y-4">
-                {cart.map((item) => (
+                {paginatedCart.map((item) => (
                   <CartItemCard
                     key={item.product.id}
                     item={item}
@@ -359,6 +372,29 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
                     onRemove={removeFromCart}
                   />
                 ))}
+                {cart.length > itemsPerPage && (
+                  <div className="flex items-center justify-between pt-4 border-t border-gray-200 text-sm">
+                    <button
+                      type="button"
+                      disabled={cartPage === 1}
+                      onClick={() => setCartPage((prev) => Math.max(prev - 1, 1))}
+                      className="px-3 py-1 rounded-lg border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Trước
+                    </button>
+                    <span className="text-gray-500">
+                      Trang {cartPage}/{cartTotalPages}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={cartPage === cartTotalPages}
+                      onClick={() => setCartPage((prev) => Math.min(prev + 1, cartTotalPages))}
+                      className="px-3 py-1 rounded-lg border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Sau
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
