@@ -61,9 +61,11 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
     address: '',
     email: '',
   });
+  const [deliveryErrors, setDeliveryErrors] = useState<Partial<Record<keyof DeliveryInfo, string>>>({});
   const [lastOrderTotal, setLastOrderTotal] = useState(0);
   const [lastOrderItems, setLastOrderItems] = useState(0);
   const userHistory = useMemo(() => getPurchaseHistoryByUser(user.userID), [user.userID]);
+  const [showCongrats, setShowCongrats] = useState(false);
   const userInitials = useMemo(
     () =>
       user.fullName
@@ -177,13 +179,30 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
 
   const handleConfirmFulfillment = () => {
     if (fulfillmentMethod === 'delivery') {
+      const errors: Partial<Record<keyof DeliveryInfo, string>> = {};
       if (!deliveryInfo.fullName || !deliveryInfo.phone || !deliveryInfo.address) {
-        alert('Vui lòng điền đầy đủ thông tin giao hàng.');
+        errors.fullName = deliveryInfo.fullName ? '' : 'Vui lòng nhập họ tên';
+        errors.phone = deliveryInfo.phone ? '' : 'Vui lòng nhập số điện thoại';
+        errors.address = deliveryInfo.address ? '' : 'Vui lòng nhập địa chỉ';
+      }
+      if (deliveryInfo.phone && !/^\d{10}$/.test(deliveryInfo.phone)) {
+        errors.phone = 'Số điện thoại phải gồm đúng 10 chữ số';
+      }
+      if (deliveryInfo.email && !deliveryInfo.email.endsWith('@gmail.com')) {
+        errors.email = 'Email giao hàng cần có đuôi @gmail.com';
+      }
+      setDeliveryErrors(errors);
+      if (Object.values(errors).some((value) => value)) {
         return;
       }
+      setDeliveryErrors({});
     }
     setIsFulfillmentVisible(false);
-    alert('Đơn hàng đã sẵn sàng để xử lý giao nhận.');
+    if (fulfillmentMethod === 'pickup') {
+      setShowCongrats(true);
+    } else {
+      setShowCongrats(true);
+    }
   };
 
   return (
@@ -194,7 +213,7 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
             <div className="flex items-center gap-4">
               <Package className="w-8 h-8 text-blue-600" />
               <div>
-                <h1 className="text-2xl font-bold text-gray-800">Hệ Thống POS</h1>
+                <h1 className="text-2xl font-bold text-gray-800">MegaPOS</h1>
                 <p className="text-sm text-gray-600">Khách hàng: {user.fullName}</p>
               </div>
             </div>
@@ -383,16 +402,23 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
           method={fulfillmentMethod}
           onMethodChange={setFulfillmentMethod}
           info={deliveryInfo}
-          onInfoChange={(field, value) => setDeliveryInfo((prev) => ({ ...prev, [field]: value }))}
+          onInfoChange={(field, value) => {
+            setDeliveryInfo((prev) => ({ ...prev, [field]: value }));
+            setDeliveryErrors((prev) => ({ ...prev, [field]: '' }));
+          }}
           onClose={() => setIsFulfillmentVisible(false)}
           onConfirm={handleConfirmFulfillment}
           total={lastOrderTotal}
           items={lastOrderItems}
+          errors={deliveryErrors}
         />
       )}
       {isProfileVisible && <ProfileModal user={user} onClose={() => setIsProfileVisible(false)} />}
       {isHistoryVisible && (
         <HistoryModal entries={userHistory} onClose={() => setIsHistoryVisible(false)} />
+      )}
+      {showCongrats && (
+        <CongratsModal method={fulfillmentMethod} onClose={() => setShowCongrats(false)} />
       )}
     </div>
   );
@@ -697,6 +723,62 @@ function HistoryModal({
   );
 }
 
+function CongratsModal({
+  onClose,
+  method,
+}: {
+  onClose: () => void;
+  method: FulfillmentMethod;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-gradient-to-b from-amber-50 via-white to-white rounded-[32px] shadow-[0_30px_80px_rgba(15,23,42,.35)] max-w-lg w-full text-center relative overflow-hidden border border-amber-100">
+        <div className="absolute inset-x-[-20%] top-[-40%] h-64 bg-gradient-to-b from-amber-200/70 to-transparent rotate-6 blur-3xl pointer-events-none" />
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute top-4 right-4 text-amber-500 hover:text-amber-600 text-xl"
+          aria-label="Đóng"
+        >
+          ×
+        </button>
+        <div className="p-10 space-y-6 relative">
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-24 h-24 rounded-3xl bg-white shadow-inner flex items-center justify-center text-5xl">
+              🎉
+            </div>
+            <div>
+              <p className="text-sm uppercase tracking-[0.3em] text-amber-500 font-semibold">Chúc mừng</p>
+              <h3 className="text-3xl font-bold text-slate-900 mt-1">Mua hàng thành công</h3>
+            </div>
+          </div>
+          <div className="bg-white/80 border border-amber-100 rounded-2xl px-5 py-4 text-slate-600 text-sm leading-relaxed shadow-inner">
+              {method === 'pickup'
+                ? 'Vui lòng lại quầy nhận hàng, đơn của bạn đang được đóng gói. Nhân viên sẽ chuẩn bị xong trong khoảng 3-5 phút. Cảm ơn bạn đã tin tưởng MegaPOS!'
+                : 'Đơn của bạn đang được đóng gói. Nhân viên sẽ chuẩn bị giao trong khoảng 15-30 phút nữa. Cảm ơn bạn đã tin tưởng MegaPOS!'}
+          </div>
+          <div className="flex items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-5 py-3 rounded-2xl border border-slate-200 text-slate-600 font-semibold hover:bg-slate-50 transition-colors"
+            >
+              Đóng
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-6 py-3 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 text-white font-semibold shadow-lg shadow-amber-300/40 hover:opacity-95 transition"
+            >
+              Tôi đã hiểu
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface FulfillmentModalProps {
   method: FulfillmentMethod;
   onMethodChange: (method: FulfillmentMethod) => void;
@@ -706,6 +788,7 @@ interface FulfillmentModalProps {
   onConfirm: () => void;
   total: number;
   items: number;
+  errors: Partial<Record<keyof DeliveryInfo, string>>;
 }
 
 function FulfillmentModal({
@@ -717,6 +800,7 @@ function FulfillmentModal({
   onConfirm,
   total,
   items,
+  errors,
 }: FulfillmentModalProps) {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -774,9 +858,14 @@ function FulfillmentModal({
                   type="text"
                   value={info.fullName}
                   onChange={(e) => onInfoChange('fullName', e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className={`w-full rounded-lg px-3 py-2 focus:ring-2 ${
+                    errors.fullName
+                      ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
+                      : 'border-gray-300 focus:ring-blue-500 focus:border-transparent'
+                  }`}
                   placeholder="Ví dụ: Nguyễn Văn A"
                 />
+                {errors.fullName && <p className="text-xs text-red-500 mt-1">{errors.fullName}</p>}
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -784,10 +873,18 @@ function FulfillmentModal({
                   <input
                     type="tel"
                     value={info.phone}
-                    onChange={(e) => onInfoChange('phone', e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    onChange={(e) => {
+                      const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 10);
+                      onInfoChange('phone', digitsOnly);
+                    }}
+                    className={`w-full rounded-lg px-3 py-2 focus:ring-2 ${
+                      errors.phone
+                        ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
+                        : 'border-gray-300 focus:ring-blue-500 focus:border-transparent'
+                    }`}
                     placeholder="0987 123 456"
                   />
+                  {errors.phone && <p className="text-xs text-red-500 mt-1">{errors.phone}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Email (tuỳ chọn)</label>
@@ -795,9 +892,14 @@ function FulfillmentModal({
                     type="email"
                     value={info.email}
                     onChange={(e) => onInfoChange('email', e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className={`w-full rounded-lg px-3 py-2 focus:ring-2 ${
+                      errors.email
+                        ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
+                        : 'border-gray-300 focus:ring-blue-500 focus:border-transparent'
+                    }`}
                     placeholder="khachhang@email.com"
                   />
+                  {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email}</p>}
                 </div>
               </div>
               <div>
@@ -805,9 +907,14 @@ function FulfillmentModal({
                 <textarea
                   value={info.address}
                   onChange={(e) => onInfoChange('address', e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[80px]"
+                  className={`w-full rounded-lg px-3 py-2 focus:ring-2 min-h-[80px] ${
+                    errors.address
+                      ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
+                      : 'border-gray-300 focus:ring-blue-500 focus:border-transparent'
+                  }`}
                   placeholder="Số nhà, đường, phường/xã, quận/huyện..."
                 />
+                {errors.address && <p className="text-xs text-red-500 mt-1">{errors.address}</p>}
               </div>
             </div>
           )}
