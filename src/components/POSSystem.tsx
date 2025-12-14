@@ -2,11 +2,9 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   UserAccount,
   Product,
-  cloneProductCatalog,
-  productCatalog,
-  getPurchaseHistoryByUser,
   PurchaseHistoryEntry,
 } from '../lib/data';
+import { productService, orderService, type CreateOrderRequest } from '../lib/api/services';
 import {
   ShoppingCart,
   LogOut,
@@ -58,12 +56,12 @@ const createEmptyDeliveryInfo = (): DeliveryInfo => ({
 });
 
 export default function POSSystem({ user, onLogout }: POSSystemProps) {
-  const [products, setProducts] = useState<Product[]>(() => cloneProductCatalog());
+  const [products, setProducts] = useState<Product[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
-  const [categories] = useState<string[]>(() => [...new Set(productCatalog.map((p) => p.category))]);
+  const [categories, setCategories] = useState<string[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isFulfillmentVisible, setIsFulfillmentVisible] = useState(false);
@@ -77,12 +75,13 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
   const itemsPerPage = 3;
   const [lastOrderTotal, setLastOrderTotal] = useState(0);
   const [lastOrderItems, setLastOrderItems] = useState(0);
-  const userHistory = useMemo(() => getPurchaseHistoryByUser(user.userID), [user.userID]);
+  const [userHistory, setUserHistory] = useState<PurchaseHistoryEntry[]>([]);
   const [showCongrats, setShowCongrats] = useState(false);
   const [pendingOrder, setPendingOrder] = useState<{ total: number; items: number } | null>(null);
   const [pendingCart, setPendingCart] = useState<CartItem[]>([]);
   const [isQrModalVisible, setIsQrModalVisible] = useState(false);
   const [qrPaymentStep, setQrPaymentStep] = useState<'scan' | 'success'>('scan');
+  const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const cartTotalPages = Math.max(1, Math.ceil(cart.length / itemsPerPage));
   const paginatedCart = useMemo(
     () => cart.slice((cartPage - 1) * itemsPerPage, cartPage * itemsPerPage),
@@ -110,6 +109,40 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isAvatarMenuOpen]);
+
+  // Load products from API
+  useEffect(() => {
+    const loadProducts = async () => {
+      setIsLoadingProducts(true);
+      try {
+        const fetchedProducts = await productService.getAllProducts();
+        setProducts(fetchedProducts);
+        // Extract unique categories
+        const uniqueCategories = [...new Set(fetchedProducts.map((p) => p.category))];
+        setCategories(uniqueCategories);
+      } catch (error) {
+        console.error('Failed to load products:', error);
+      } finally {
+        setIsLoadingProducts(false);
+      }
+    };
+    loadProducts();
+  }, []);
+
+  // Load user orders
+  useEffect(() => {
+    const loadUserOrders = async () => {
+      if (user.userID > 0) {
+        try {
+          const orders = await orderService.getUserOrders(user.userID);
+          setUserHistory(orders);
+        } catch (error) {
+          console.error('Failed to load user orders:', error);
+        }
+      }
+    };
+    loadUserOrders();
+  }, [user.userID]);
 
   useEffect(() => {
     filterProducts();
@@ -221,7 +254,13 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
       return;
     }
 
-    finalizeCheckout(cartSnapshot, totalAmount, totalItems);
+    // Don't create order yet - wait for fulfillment confirmation
+    // Just show fulfillment modal
+    setIsFulfillmentVisible(true);
+    setLastOrderTotal(totalAmount);
+    setLastOrderItems(totalItems);
+    setPendingOrder({ total: totalAmount, items: totalItems });
+    setPendingCart(cartSnapshot);
   };
 
   const handleQrModalClose = () => {
@@ -231,16 +270,20 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
     setPendingCart([]);
   };
 
-  const handleQrPaymentSuccess = () => {
+  const handleQrPaymentSuccess = async () => {
     if (!pendingOrder || pendingCart.length === 0) return;
     setQrPaymentStep('success');
+    
+    // Close QR modal and show fulfillment modal
     setTimeout(() => {
       setIsQrModalVisible(false);
-      finalizeCheckout(pendingCart, pendingOrder.total, pendingOrder.items);
+      setIsFulfillmentVisible(true);
+      setLastOrderTotal(pendingOrder.total);
+      setLastOrderItems(pendingOrder.items);
     }, 1200);
   };
 
-  const handleConfirmFulfillment = () => {
+  const handleConfirmFulfillment = async () => {
     if (fulfillmentMethod === 'delivery') {
       const errors: Partial<Record<keyof DeliveryInfo, string>> = {};
       if (!deliveryInfo.fullName) {
@@ -273,11 +316,31 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
       }
       setDeliveryErrors({});
     }
-    setIsFulfillmentVisible(false);
-    if (fulfillmentMethod === 'pickup') {
-      setShowCongrats(true);
-    } else {
-      setShowCongrats(true);
+
+    // Create order with fulfillment method
+    if (pendingCart.length > 0 && pendingOrder) {
+      try {
+        const orderData: CreateOrderRequest = {
+          userId: user.userID,
+          items: pendingCart.map(item => ({
+            productId: item.product.id,
+            quantity: item.quantity,
+            price: item.product.price,
+          })),
+          totalAmount: pendingOrder.total,
+          paymentMethod: isQrModalVisible ? 'transfer' : 'cash',
+          fulfillmentMethod,
+          deliveryInfo: fulfillmentMethod === 'delivery' ? deliveryInfo : undefined,
+        };
+        
+        await orderService.createOrder(orderData);
+        finalizeCheckout(pendingCart, pendingOrder.total, pendingOrder.items);
+        setIsFulfillmentVisible(false);
+        setShowCongrats(true);
+      } catch (error) {
+        console.error('Failed to create order:', error);
+        alert('Có lỗi xảy ra khi tạo đơn hàng. Vui lòng thử lại.');
+      }
     }
   };
 
@@ -388,21 +451,29 @@ export default function POSSystem({ user, onLogout }: POSSystemProps) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {filteredProducts.map((product) => (
-              <ProductCard
-                key={product.id}
-                product={product}
-                onAdd={addToCart}
-                isSelected={selectedProduct?.id === product.id}
-              />
-            ))}
-          </div>
-
-          {filteredProducts.length === 0 && (
+          {isLoadingProducts ? (
             <div className="text-center py-12">
-              <p className="text-gray-500">Không tìm thấy sản phẩm nào</p>
+              <p className="text-gray-500">Đang tải sản phẩm...</p>
             </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                {filteredProducts.map((product) => (
+                  <ProductCard
+                    key={product.id}
+                    product={product}
+                    onAdd={addToCart}
+                    isSelected={selectedProduct?.id === product.id}
+                  />
+                ))}
+              </div>
+
+              {filteredProducts.length === 0 && (
+                <div className="text-center py-12">
+                  <p className="text-gray-500">Không tìm thấy sản phẩm nào</p>
+                </div>
+              )}
+            </>
           )}
           </div>
 
