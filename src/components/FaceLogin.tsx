@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import * as faceapi from 'face-api.js';
-import { UserAccount, users } from '../lib/data';
+import { UserAccount } from '../lib/data';
 import { Camera, Loader2, ShieldCheck, RefreshCcw, Sun } from 'lucide-react';
+import { authService } from '../lib/api/services';
 
 interface FaceLoginProps {
   onLogin: (user: UserAccount) => void;
@@ -91,17 +92,61 @@ export default function FaceLogin({ onLogin }: FaceLoginProps) {
   };
 
   const matchFace = async () => {
-    const matchedUser = users[0];
-    if (!matchedUser) {
-      setMessage('Không có dữ liệu người dùng demo.');
+    if (!videoRef.current) return;
+    
+    try {
+      setMessage('Đang so khớp khuôn mặt với hệ thống...');
+      
+      const detections = await faceapi
+        .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions())
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+      if (!detections) {
+        setMessage('Không phát hiện khuôn mặt. Thử lại...');
+        setTimeout(detectFace, 2000);
+        return;
+      }
+
+      const descriptor = Array.from(detections.descriptor);
+      const imageData = videoRef.current ? await captureImage() : undefined;
+      
+      const result = await authService.faceLogin(descriptor, imageData);
+      
+      if (result && result.user) {
+        setMessage(`Xin chào ${result.user.fullName}! Đang tải hồ sơ...`);
+        setTimeout(() => {
+          stopCamera();
+          onLogin(result.user);
+        }, 1200);
+      } else {
+        setMessage('Không tìm thấy người dùng khớp. Vui lòng thử lại.');
+        setTimeout(detectFace, 2000);
+      }
+    } catch (error) {
+      console.error('Face matching error:', error);
+      setMessage('Lỗi so khớp. Vui lòng thử lại.');
       stopCamera();
-      return;
     }
-    setMessage(`Xin chào ${matchedUser.fullName}! Đang tải hồ sơ...`);
-    setTimeout(() => {
-      stopCamera();
-      onLogin(matchedUser);
-    }, 1200);
+  };
+
+  const captureImage = async (): Promise<string | undefined> => {
+    if (!videoRef.current || !canvasRef.current) return undefined;
+    
+    try {
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, 0, 0);
+        return canvas.toDataURL('image/jpeg', 0.8);
+      }
+    } catch (error) {
+      console.error('Error capturing image:', error);
+    }
+    return undefined;
   };
 
   const stopCamera = () => {
