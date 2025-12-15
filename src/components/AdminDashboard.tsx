@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import {
   Product,
   cloneProductCatalog,
-  productCatalog,
 } from '../lib/data';
 import {
   LogOut,
@@ -19,17 +18,29 @@ import {
   Menu,
   X as XIcon,
   RefreshCw,
+  Users,
 } from 'lucide-react';
 import * as productAPI from '../lib/api/products';
-import { CreateProductDto, UpdateProductDto } from '../lib/api/products';
+import { ProductFormData } from '../lib/api/products';
 import * as orderAPI from '../lib/api/orders';
 import { Order } from '../lib/api/orders';
+import * as categoryAPI from '../lib/api/categories';
+import { Category } from '../lib/api/categories';
+import * as userAPI from '../lib/api/users';
+import { User as ApiUser, UserFormData } from '../lib/api/users';
 
 interface AdminDashboardProps {
   onLogout: () => void;
 }
 
-type TabType = 'dashboard' | 'products' | 'orders' | 'categories';
+type TabType = 'dashboard' | 'products' | 'orders' | 'categories' | 'users';
+type CategoryFormData = {
+  name: string;
+  description?: string;
+  parentCategoryID?: number;
+  imageUrl?: string;
+  isActive?: boolean;
+};
 
 export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
@@ -42,12 +53,18 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
   const [ordersError, setOrdersError] = useState<string | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [isLoadingCategories, setIsLoadingCategories] = useState(false);
+  const [categoriesError, setCategoriesError] = useState<string | null>(null);
+  const [users, setUsers] = useState<ApiUser[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [usersError, setUsersError] = useState<string | null>(null);
 
-  // Admin mode states
+  // Admin mode states - Products
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [formData, setFormData] = useState<CreateProductDto | UpdateProductDto>({
+  const [formData, setFormData] = useState<ProductFormData>({
     name: '',
     barcode: '',
     price: 0,
@@ -55,13 +72,40 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     imageUrl: '',
   });
 
+  // Admin mode states - Categories
+  const [isCategoryEditModalOpen, setIsCategoryEditModalOpen] = useState(false);
+  const [isCategoryCreateModalOpen, setIsCategoryCreateModalOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [categoryFormData, setCategoryFormData] = useState<CategoryFormData>({
+    name: '',
+    description: '',
+    imageUrl: '',
+    isActive: true,
+  });
+
+  // Admin mode states - Users
+  const [isUserEditModalOpen, setIsUserEditModalOpen] = useState(false);
+  const [isUserCreateModalOpen, setIsUserCreateModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<ApiUser | null>(null);
+  const [userFormData, setUserFormData] = useState<UserFormData>({
+    fullName: '',
+    email: '',
+    password: '',
+    phoneNumber: '',
+    avatarUrl: '',
+    isActive: true,
+  });
+
   useEffect(() => {
     filterProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [products, searchTerm]);
 
   useEffect(() => {
     loadProducts();
     loadOrders();
+    loadCategories();
+    loadUsers();
   }, []);
 
   const loadProducts = async () => {
@@ -98,7 +142,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       setOrders(apiOrders);
     } catch (err) {
       console.error('Failed to load orders:', err);
-      setOrdersError('Không thể tải danh sách đơn hàng.');
+      const errorMessage = err instanceof Error ? err.message : 'Không thể tải danh sách đơn hàng.';
+      setOrdersError(`Lỗi: ${errorMessage}. Vui lòng kiểm tra backend có đang chạy không.`);
       setOrders([]);
     } finally {
       setIsLoadingOrders(false);
@@ -115,6 +160,163 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     }
   };
 
+  // Categories functions
+  const loadCategories = async () => {
+    setIsLoadingCategories(true);
+    setCategoriesError(null);
+    try {
+      const apiCategories = await categoryAPI.getAllCategories();
+      setCategories(apiCategories);
+    } catch (err) {
+      console.error('Failed to load categories:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Không thể tải danh sách danh mục.';
+      setCategoriesError(`Lỗi: ${errorMessage}. Vui lòng kiểm tra backend có đang chạy không.`);
+      setCategories([]);
+    } finally {
+      setIsLoadingCategories(false);
+    }
+  };
+
+  const handleCreateCategory = () => {
+    setCategoryFormData({
+      name: '',
+      description: '',
+      imageUrl: '',
+      isActive: true,
+    });
+    setEditingCategory(null);
+    setIsCategoryCreateModalOpen(true);
+  };
+
+  const handleEditCategory = (category: Category) => {
+    setEditingCategory(category);
+    setCategoryFormData({
+      name: category.name,
+      description: category.description,
+      imageUrl: category.imageUrl,
+      isActive: category.isActive,
+      parentCategoryID: category.parentCategoryID,
+    });
+    setIsCategoryEditModalOpen(true);
+  };
+
+  const handleSaveCategory = async () => {
+    try {
+      if (editingCategory) {
+        await categoryAPI.updateCategory(editingCategory.categoryID, categoryFormData);
+      } else {
+        await categoryAPI.createCategory(categoryFormData);
+      }
+      await loadCategories();
+      setIsCategoryEditModalOpen(false);
+      setIsCategoryCreateModalOpen(false);
+      setEditingCategory(null);
+      setCategoryFormData({
+        name: '',
+        description: '',
+        imageUrl: '',
+        isActive: true,
+      });
+    } catch (err) {
+      console.error('Failed to save category:', err);
+      alert('Không thể lưu danh mục. Vui lòng thử lại.');
+    }
+  };
+
+  const handleDeleteCategory = async (category: Category) => {
+    if (!confirm(`Bạn có chắc muốn xóa danh mục "${category.name}"?`)) {
+      return;
+    }
+    try {
+      await categoryAPI.deleteCategory(category.categoryID);
+      await loadCategories();
+    } catch (err) {
+      console.error('Failed to delete category:', err);
+      alert('Không thể xóa danh mục. Vui lòng thử lại.');
+    }
+  };
+
+  // Users functions
+  const loadUsers = async () => {
+    setIsLoadingUsers(true);
+    setUsersError(null);
+    try {
+      const apiUsers = await userAPI.getAllUsers();
+      setUsers(apiUsers);
+    } catch (err) {
+      console.error('Failed to load users:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Không thể tải danh sách người dùng.';
+      setUsersError(`Lỗi: ${errorMessage}. Vui lòng kiểm tra backend có đang chạy không.`);
+      setUsers([]);
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  };
+
+  const handleCreateUser = () => {
+    setUserFormData({
+      fullName: '',
+      email: '',
+      password: '',
+      phoneNumber: '',
+      avatarUrl: '',
+      isActive: true,
+    });
+    setEditingUser(null);
+    setIsUserCreateModalOpen(true);
+  };
+
+  const handleEditUser = (user: ApiUser) => {
+    setEditingUser(user);
+    setUserFormData({
+      fullName: user.fullName,
+      email: user.email,
+      phoneNumber: user.phoneNumber || '',
+      avatarUrl: user.avatarUrl || '',
+      isActive: user.isActive,
+    });
+    setIsUserEditModalOpen(true);
+  };
+
+  const handleSaveUser = async () => {
+    try {
+      if (editingUser) {
+        await userAPI.updateUser(editingUser.userID, userFormData);
+      } else {
+        await userAPI.createUser(userFormData);
+      }
+      await loadUsers();
+      setIsUserEditModalOpen(false);
+      setIsUserCreateModalOpen(false);
+      setEditingUser(null);
+      setUserFormData({
+        fullName: '',
+        email: '',
+        password: '',
+        phoneNumber: '',
+        avatarUrl: '',
+        isActive: true,
+      });
+    } catch (err) {
+      console.error('Failed to save user:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Không thể lưu người dùng.';
+      alert(errorMessage);
+    }
+  };
+
+  const handleDeleteUser = async (user: ApiUser) => {
+    if (!confirm(`Bạn có chắc muốn xóa người dùng "${user.fullName}"?`)) {
+      return;
+    }
+    try {
+      await userAPI.deleteUser(user.userID);
+      await loadUsers();
+    } catch (err) {
+      console.error('Failed to delete user:', err);
+      alert('Không thể xóa người dùng. Vui lòng thử lại.');
+    }
+  };
+
   const handleCreateProduct = () => {
     setFormData({
       name: '',
@@ -122,6 +324,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       price: 0,
       stock: 0,
       imageUrl: '',
+      categoryID: undefined,
     });
     setEditingProduct(null);
     setIsCreateModalOpen(true);
@@ -135,6 +338,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       price: product.price,
       stock: product.stock,
       imageUrl: product.image_url,
+      categoryID: product.categoryID,
     });
     setIsEditModalOpen(true);
   };
@@ -145,19 +349,12 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         const productId = parseInt(editingProduct.id.replace('prod-', ''));
         await productAPI.updateProduct(productId, formData);
       } else {
-        await productAPI.createProduct(formData as CreateProductDto);
+        await productAPI.createProduct(formData);
       }
       await loadProducts();
       setIsEditModalOpen(false);
       setIsCreateModalOpen(false);
       setEditingProduct(null);
-      setFormData({
-        name: '',
-        barcode: '',
-        price: 0,
-        stock: 0,
-        imageUrl: '',
-      });
     } catch (err) {
       console.error('Failed to save product:', err);
       alert('Không thể lưu sản phẩm. Vui lòng thử lại.');
@@ -189,7 +386,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     }
   };
 
-  const categories = [...new Set(products.map((p) => p.category))];
   const totalRevenue = orders.reduce((sum, order) => sum + order.totalAmount, 0);
   const totalOrders = orders.length;
   const totalProducts = products.length;
@@ -246,6 +442,12 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             active={activeTab === 'categories'}
             onClick={() => setActiveTab('categories')}
           />
+          <SidebarItem
+            icon={Users}
+            label="Người dùng"
+            active={activeTab === 'users'}
+            onClick={() => setActiveTab('users')}
+          />
         </nav>
 
         <div className="p-4 border-t border-gray-200">
@@ -275,6 +477,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
               {activeTab === 'products' && 'Quản lý sản phẩm'}
               {activeTab === 'orders' && 'Quản lý đơn hàng'}
               {activeTab === 'categories' && 'Quản lý danh mục'}
+              {activeTab === 'users' && 'Quản lý người dùng'}
             </h2>
             <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 font-semibold flex items-center justify-center">
               AD
@@ -324,17 +527,41 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             />
           )}
 
-          {activeTab === 'categories' && <CategoriesView categories={categories} products={products} />}
+          {activeTab === 'categories' && (
+            <CategoriesView
+              categories={categories}
+              products={products}
+              isLoading={isLoadingCategories}
+              error={categoriesError}
+              onCreate={handleCreateCategory}
+              onEdit={handleEditCategory}
+              onDelete={handleDeleteCategory}
+              onRefresh={loadCategories}
+            />
+          )}
+
+          {activeTab === 'users' && (
+            <UsersView
+              users={users}
+              isLoading={isLoadingUsers}
+              error={usersError}
+              onCreate={handleCreateUser}
+              onEdit={handleEditUser}
+              onDelete={handleDeleteUser}
+              onRefresh={loadUsers}
+            />
+          )}
         </main>
       </div>
 
-      {/* Create/Edit Modal */}
+      {/* Create/Edit Product Modal */}
       {(isCreateModalOpen || isEditModalOpen) && (
         <ProductModal
           isOpen={isCreateModalOpen || isEditModalOpen}
           isEdit={!!editingProduct}
           product={editingProduct}
           formData={formData}
+          categories={categories}
           onFormDataChange={setFormData}
           onClose={() => {
             setIsCreateModalOpen(false);
@@ -346,9 +573,58 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
               price: 0,
               stock: 0,
               imageUrl: '',
+              categoryID: undefined,
             });
           }}
           onSave={handleSaveProduct}
+        />
+      )}
+
+      {/* Create/Edit Category Modal */}
+      {(isCategoryCreateModalOpen || isCategoryEditModalOpen) && (
+        <CategoryModal
+          isOpen={isCategoryCreateModalOpen || isCategoryEditModalOpen}
+          isEdit={!!editingCategory}
+          category={editingCategory}
+          formData={categoryFormData}
+          categories={categories}
+          onFormDataChange={setCategoryFormData}
+          onClose={() => {
+            setIsCategoryCreateModalOpen(false);
+            setIsCategoryEditModalOpen(false);
+            setEditingCategory(null);
+            setCategoryFormData({
+              name: '',
+              description: '',
+              imageUrl: '',
+              isActive: true,
+            });
+          }}
+          onSave={handleSaveCategory}
+        />
+      )}
+
+      {/* Create/Edit User Modal */}
+      {(isUserCreateModalOpen || isUserEditModalOpen) && (
+        <UserModal
+          isOpen={isUserCreateModalOpen || isUserEditModalOpen}
+          isEdit={!!editingUser}
+          user={editingUser}
+          formData={userFormData}
+          onFormDataChange={setUserFormData}
+          onClose={() => {
+            setIsUserCreateModalOpen(false);
+            setIsUserEditModalOpen(false);
+            setEditingUser(null);
+            setUserFormData({
+              fullName: '',
+              email: '',
+              password: '',
+              phoneNumber: '',
+              avatarUrl: '',
+            });
+          }}
+          onSave={handleSaveUser}
         />
       )}
     </div>
@@ -598,10 +874,10 @@ interface AdminProductCardProps {
 }
 
 function AdminProductCard({ product, onEdit, onDelete, onUpdateStock }: AdminProductCardProps) {
-  const [stockInput, setStockInput] = useState(product.stock.toString());
+  const [stockInput, setStockInput] = useState((product.stock ?? 0).toString());
 
   useEffect(() => {
-    setStockInput(product.stock.toString());
+    setStockInput((product.stock ?? 0).toString());
   }, [product.stock]);
 
   const handleStockChange = (newStock: number) => {
@@ -623,9 +899,9 @@ function AdminProductCard({ product, onEdit, onDelete, onUpdateStock }: AdminPro
           }}
         />
       </div>
-      <h3 className="font-semibold text-gray-800 mb-1 line-clamp-2 text-sm">{product.name}</h3>
+      <h3 className="font-semibold text-gray-800 mb-1 line-clamp-2 text-sm">{product.name || 'Chưa có tên'}</h3>
       <p className="text-lg font-bold text-blue-600 mb-2">
-        {product.price.toLocaleString('vi-VN')}đ
+        {(product.price ?? 0).toLocaleString('vi-VN')}đ
       </p>
       <div className="space-y-2 mb-3">
         <div className="flex items-center justify-between text-xs">
@@ -647,7 +923,7 @@ function AdminProductCard({ product, onEdit, onDelete, onUpdateStock }: AdminPro
               if (!isNaN(num) && num >= 0) {
                 handleStockChange(num);
               } else {
-                setStockInput(product.stock.toString());
+                setStockInput((product.stock ?? 0).toString());
               }
             }}
             className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -806,29 +1082,125 @@ function OrdersView({ orders, isLoading, error, onUpdateStatus, onRefresh }: Ord
 
 // Categories View
 interface CategoriesViewProps {
-  categories: string[];
+  categories: Category[];
   products: Product[];
+  isLoading: boolean;
+  error: string | null;
+  onCreate: () => void;
+  onEdit: (category: Category) => void;
+  onDelete: (category: Category) => void;
+  onRefresh: () => void;
 }
 
-function CategoriesView({ categories, products }: CategoriesViewProps) {
+function CategoriesView({
+  categories,
+  products,
+  isLoading,
+  error,
+  onCreate,
+  onEdit,
+  onDelete,
+  onRefresh,
+}: CategoriesViewProps) {
+  const getCategoryProductCount = (categoryId: number) => {
+    return products.filter((p) => p.categoryID === categoryId || false).length;
+  };
+
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-6">
-      <h3 className="text-lg font-semibold text-gray-800 mb-4">Danh sách danh mục</h3>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {categories.map((category) => {
-          const categoryProducts = products.filter((p) => p.category === category);
-          return (
-            <div
-              key={category}
-              className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
+    <div className="space-y-6">
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-800">Danh sách danh mục</h3>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onRefresh}
+              disabled={isLoading}
+              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
             >
-              <h4 className="font-semibold text-gray-800 mb-2">{category}</h4>
-              <p className="text-sm text-gray-600">
-                {categoryProducts.length} sản phẩm
-              </p>
-            </div>
-          );
-        })}
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+              Làm mới
+            </button>
+            <button
+              onClick={onCreate}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors flex items-center gap-2"
+            >
+              <Plus className="w-5 h-5" />
+              Thêm danh mục
+            </button>
+          </div>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+            <p className="text-sm text-red-800">{error}</p>
+          </div>
+        )}
+
+        {isLoading ? (
+          <div className="text-center py-12">
+            <p className="text-gray-500">Đang tải danh mục...</p>
+          </div>
+        ) : categories.length === 0 ? (
+          <p className="text-gray-500">Chưa có danh mục nào</p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {categories.map((category) => {
+              const productCount = getCategoryProductCount(category.categoryID);
+              return (
+                <div
+                  key={category.id}
+                  className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-semibold text-gray-800">{category.name}</h4>
+                        <span className="text-[11px] px-2 py-1 rounded-full bg-gray-100 text-gray-700">
+                          ID: {category.categoryID}
+                        </span>
+                        {category.parentCategoryID && (
+                          <span className="text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-700">
+                            Parent: {category.parentCategoryID}
+                          </span>
+                        )}
+                      </div>
+                      {category.description && (
+                        <p className="text-sm text-gray-600 line-clamp-2">{category.description}</p>
+                      )}
+                    </div>
+                    <span
+                      className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                        category.isActive
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-gray-100 text-gray-700'
+                      }`}
+                    >
+                      {category.isActive ? 'Hoạt động' : 'Tạm khóa'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200">
+                    <p className="text-sm text-gray-600">{productCount} sản phẩm</p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => onEdit(category)}
+                        className="px-3 py-1 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-1"
+                      >
+                        <Edit className="w-4 h-4" />
+                        Sửa
+                      </button>
+                      <button
+                        onClick={() => onDelete(category)}
+                        className="px-3 py-1 bg-red-600 text-white rounded text-sm font-medium hover:bg-red-700 transition-colors flex items-center"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -839,8 +1211,9 @@ interface ProductModalProps {
   isOpen: boolean;
   isEdit: boolean;
   product: Product | null;
-  formData: CreateProductDto | UpdateProductDto;
-  onFormDataChange: (data: CreateProductDto | UpdateProductDto) => void;
+  formData: ProductFormData;
+  categories: Category[];
+  onFormDataChange: (data: ProductFormData) => void;
   onClose: () => void;
   onSave: () => void;
 }
@@ -849,13 +1222,14 @@ function ProductModal({
   isOpen,
   isEdit,
   formData,
+  categories,
   onFormDataChange,
   onClose,
   onSave,
 }: ProductModalProps) {
   if (!isOpen) return null;
 
-  const handleChange = (field: keyof CreateProductDto, value: any) => {
+  const handleChange = (field: keyof ProductFormData, value: string | number | boolean | undefined) => {
     onFormDataChange({ ...formData, [field]: value });
   };
 
@@ -907,6 +1281,27 @@ function ProductModal({
                 placeholder="Nhập mã vạch"
                 required
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Danh mục <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={formData.categoryID ?? ''}
+                onChange={(e) =>
+                  handleChange('categoryID', e.target.value ? parseInt(e.target.value, 10) : undefined)
+                }
+                className="w-full rounded-lg px-3 py-2 border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required
+              >
+                <option value="">Chọn danh mục</option>
+                {categories.map((cat) => (
+                  <option key={cat.categoryID} value={cat.categoryID}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div>
@@ -977,6 +1372,458 @@ function ProductModal({
                 rows={4}
               />
             </div>
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2"
+          >
+            <X className="w-4 h-4" />
+            Hủy
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            className="px-5 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors flex items-center gap-2"
+          >
+            <Save className="w-4 h-4" />
+            {isEdit ? 'Cập nhật' : 'Tạo mới'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Category Modal
+interface CategoryModalProps {
+  isOpen: boolean;
+  isEdit: boolean;
+  category: Category | null;
+  formData: CategoryFormData;
+  categories: Category[];
+  onFormDataChange: (data: CategoryFormData) => void;
+  onClose: () => void;
+  onSave: () => void;
+}
+
+function CategoryModal({
+  isOpen,
+  isEdit,
+  category,
+  formData,
+  categories,
+  onFormDataChange,
+  onClose,
+  onSave,
+}: CategoryModalProps) {
+  if (!isOpen) return null;
+
+  const handleChange = (field: keyof CategoryFormData, value: string | number | boolean | undefined) => {
+    onFormDataChange({ ...formData, [field]: value });
+  };
+
+  // Filter out current category from parent options (to avoid circular reference)
+  const availableParentCategories = isEdit && category
+    ? categories.filter((c) => c.categoryID !== category.categoryID)
+    : categories;
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden">
+        <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+          <div>
+            <p className="text-sm text-gray-500">Quản lý danh mục</p>
+            <h3 className="text-xl font-semibold text-gray-800">
+              {isEdit ? 'Sửa danh mục' : 'Thêm danh mục mới'}
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-gray-500 hover:text-gray-900 text-xl leading-none px-2 py-1"
+            aria-label="Đóng"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Tên danh mục <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={formData.name || ''}
+                onChange={(e) => handleChange('name', e.target.value)}
+                className="w-full rounded-lg px-3 py-2 border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="Nhập tên danh mục"
+                required
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Mô tả
+              </label>
+              <textarea
+                value={formData.description || ''}
+                onChange={(e) => handleChange('description', e.target.value)}
+                className="w-full rounded-lg px-3 py-2 border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="Nhập mô tả danh mục"
+                rows={3}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Danh mục cha (tùy chọn)
+              </label>
+              <select
+                value={formData.parentCategoryID || ''}
+                onChange={(e) =>
+                  handleChange('parentCategoryID', e.target.value ? parseInt(e.target.value) : undefined)
+                }
+                className="w-full rounded-lg px-3 py-2 border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">Không có (danh mục gốc)</option>
+                {availableParentCategories.map((cat) => (
+                  <option key={cat.categoryID} value={cat.categoryID}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                URL hình ảnh
+              </label>
+              <input
+                type="url"
+                value={formData.imageUrl || ''}
+                onChange={(e) => handleChange('imageUrl', e.target.value)}
+                className="w-full rounded-lg px-3 py-2 border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="https://example.com/image.jpg"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={formData.isActive ?? true}
+                  onChange={(e) => handleChange('isActive', e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm font-medium text-gray-700">Danh mục đang hoạt động</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2"
+          >
+            <X className="w-4 h-4" />
+            Hủy
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            className="px-5 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors flex items-center gap-2"
+          >
+            <Save className="w-4 h-4" />
+            {isEdit ? 'Cập nhật' : 'Tạo mới'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// Users View
+interface UsersViewProps {
+  users: ApiUser[];
+  isLoading: boolean;
+  error: string | null;
+  onCreate: () => void;
+  onEdit: (user: ApiUser) => void;
+  onDelete: (user: ApiUser) => void;
+  onRefresh: () => void;
+}
+
+function UsersView({
+  users,
+  isLoading,
+  error,
+  onCreate,
+  onEdit,
+  onDelete,
+  onRefresh,
+}: UsersViewProps) {
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-800">Danh sách người dùng</h3>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onRefresh}
+              disabled={isLoading}
+              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+              Làm mới
+            </button>
+            <button
+              onClick={onCreate}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors flex items-center gap-2"
+            >
+              <Plus className="w-5 h-5" />
+              Thêm người dùng
+            </button>
+          </div>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+            <p className="text-sm text-red-800">{error}</p>
+          </div>
+        )}
+
+        {isLoading ? (
+          <div className="text-center py-12">
+            <p className="text-gray-500">Đang tải người dùng...</p>
+          </div>
+        ) : users.length === 0 ? (
+          <p className="text-gray-500">Chưa có người dùng nào</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-gray-500 border-b">
+                  <th className="py-2 text-left">ID</th>
+                  <th className="py-2 text-left">Họ tên</th>
+                  <th className="py-2 text-left">Email</th>
+                  <th className="py-2 text-left">Số điện thoại</th>
+                  <th className="py-2 text-left">Ngày tạo</th>
+                  <th className="py-2 text-left">Trạng thái</th>
+                  <th className="py-2 text-left">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((user) => (
+                  <tr key={user.id} className="border-b hover:bg-gray-50">
+                    <td className="py-3 font-semibold">#{user.userID}</td>
+                    <td className="py-3">
+                      <div className="flex items-center gap-2">
+                        {user.avatarUrl ? (
+                          <img
+                            src={user.avatarUrl}
+                            alt={user.fullName}
+                            className="w-8 h-8 rounded-full"
+                          />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 font-semibold flex items-center justify-center text-xs">
+                            {user.fullName
+                              .split(' ')
+                              .slice(-2)
+                              .map((part) => part[0])
+                              .join('')
+                              .toUpperCase()}
+                          </div>
+                        )}
+                        <span className="font-medium text-gray-800">{user.fullName}</span>
+                      </div>
+                    </td>
+                    <td className="py-3 text-gray-600">{user.email}</td>
+                    <td className="py-3 text-gray-600">{user.phoneNumber || '-'}</td>
+                    <td className="py-3 text-gray-600">
+                      {new Date(user.createdAt).toLocaleDateString('vi-VN')}
+                    </td>
+                    <td className="py-3">
+                      <span
+                        className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                          user.isActive
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-gray-100 text-gray-700'
+                        }`}
+                      >
+                        {user.isActive ? 'Hoạt động' : 'Tạm khóa'}
+                      </span>
+                    </td>
+                    <td className="py-3">
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => onEdit(user)}
+                          className="px-3 py-1 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-1"
+                        >
+                          <Edit className="w-4 h-4" />
+                          Sửa
+                        </button>
+                        <button
+                          onClick={() => onDelete(user)}
+                          className="px-3 py-1 bg-red-600 text-white rounded text-sm font-medium hover:bg-red-700 transition-colors flex items-center"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// User Modal
+interface UserModalProps {
+  isOpen: boolean;
+  isEdit: boolean;
+  user: ApiUser | null;
+  formData: UserFormData;
+  onFormDataChange: (data: UserFormData) => void;
+  onClose: () => void;
+  onSave: () => void;
+}
+
+function UserModal({
+  isOpen,
+  isEdit,
+  formData,
+  onFormDataChange,
+  onClose,
+  onSave,
+}: UserModalProps) {
+  if (!isOpen) return null;
+
+  const handleChange = (field: keyof UserFormData, value: string | number | boolean | undefined) => {
+    onFormDataChange({ ...formData, [field]: value });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden">
+        <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+          <div>
+            <p className="text-sm text-gray-500">Quản lý người dùng</p>
+            <h3 className="text-xl font-semibold text-gray-800">
+              {isEdit ? 'Sửa người dùng' : 'Thêm người dùng mới'}
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-gray-500 hover:text-gray-900 text-xl leading-none px-2 py-1"
+            aria-label="Đóng"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Họ và tên <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={formData.fullName || ''}
+                onChange={(e) => handleChange('fullName', e.target.value)}
+                className="w-full rounded-lg px-3 py-2 border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="Nhập họ và tên"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Email <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="email"
+                value={formData.email || ''}
+                onChange={(e) => handleChange('email', e.target.value)}
+                className="w-full rounded-lg px-3 py-2 border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
+                placeholder="email@example.com"
+                required
+                disabled={isEdit}
+              />
+              {isEdit && (
+                <p className="text-xs text-gray-500 mt-1">Email không thể thay đổi</p>
+              )}
+            </div>
+
+            {!isEdit && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Mật khẩu <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="password"
+                  value={formData.password || ''}
+                  onChange={(e) => handleChange('password', e.target.value)}
+                  className="w-full rounded-lg px-3 py-2 border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Nhập mật khẩu"
+                  required={!isEdit}
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Số điện thoại
+              </label>
+              <input
+                type="tel"
+                value={formData.phoneNumber || ''}
+                onChange={(e) => handleChange('phoneNumber', e.target.value)}
+                className="w-full rounded-lg px-3 py-2 border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="0987 654 321"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                URL hình đại diện
+              </label>
+              <input
+                type="url"
+                value={formData.avatarUrl || ''}
+                onChange={(e) => handleChange('avatarUrl', e.target.value)}
+                className="w-full rounded-lg px-3 py-2 border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="https://example.com/avatar.jpg"
+              />
+            </div>
+
+            {isEdit && (
+              <div className="md:col-span-2">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.isActive ?? true}
+                    onChange={(e) => handleChange('isActive', e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm font-medium text-gray-700">Tài khoản đang hoạt động</span>
+                </label>
+              </div>
+            )}
           </div>
         </div>
 

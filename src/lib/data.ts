@@ -19,12 +19,14 @@ export type Location = {
 
 export type Product = {
   id: string;
+  categoryID?: number;
   name: string;
   barcode: string;
   price: number;
   stock: number;
   location_id: string;
   image_url: string;
+  isActive?: boolean;
   category: string;
   location?: Location;
 };
